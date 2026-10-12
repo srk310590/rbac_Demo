@@ -1,0 +1,27 @@
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    command: start-dev
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+
+  # One-shot container that waits for Keycloak, then creates the demo
+  # realm, roles, client and users via the Keycloak Admin REST API.
+  # Safe to re-run (it skips anything that already exists).
+  keycloak-setup:
+    image: python:3.12-alpine
+    depends_on:
+      - keycloak
+    volumes:
+      - ./keycloak:/setup:ro
+    environment:
+      KEYCLOAK_URL: http://keycloak:8080
+      KC_ADMIN: admin
+      KC_ADMIN_PASSWORD: admin
+      KC_REALM: rbac-demo
+      KC_CLIENT_ID: rbac-demo-app
+      KC_FRONTEND_ORIGIN: http://localhost:5173
+    command: ["python", "/setup/setup_realm.py"]
