@@ -1,0 +1,71 @@
+name: Deploy RBAC Demo to GKE
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  PROJECT_ID: projectgcptest1
+  REGION: us-east1
+  CLUSTER_NAME: rbac-cluster
+  GAR_REPO: rbac-repo
+  WORKLOAD_IDENTITY_PROVIDER: projects/693173722336/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+  SERVICE_ACCOUNT: github-actions-sa@projectgcptest1.iam.gserviceaccount.com
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCP
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+
+      - name: Get GKE Credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER_NAME }}
+          location: ${{ env.REGION }}
+
+      - name: Build & Push Backend Image
+        run: |
+          IMAGE_TAG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPO }}/backend:${{ github.sha }}"
+          docker build -t $IMAGE_TAG backend/
+          docker push $IMAGE_TAG
+
+      - name: Build & Push Frontend Image
+        run: |
+          IMAGE_TAG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPO }}/frontend:${{ github.sha }}"
+          docker build \
+            --build-arg VITE_KEYCLOAK_ISSUER="http://136.69.114.34/auth/realms/rbac-demo" \
+            --build-arg VITE_REDIRECT_URI="http://136.69.114.34/" \
+            --build-arg VITE_API_BASE_URL="http://136.69.114.34" \
+            -t $IMAGE_TAG frontend/
+          docker push $IMAGE_TAG
+
+      - name: Deploy to GKE
+        run: |
+          # Replace placeholder images with current commit SHA
+          sed -i "s|REGION-docker.pkg.dev/PROJECT_ID/rbac-repo/backend:latest|${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPO }}/backend:${{ github.sha }}|g" k8s/backend.yaml
+          sed -i "s|REGION-docker.pkg.dev/PROJECT_ID/rbac-repo/frontend:latest|${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPO }}/frontend:${{ github.sha }}|g" k8s/frontend.yaml
+
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/database.yaml
+          kubectl apply -f k8s/keycloak.yaml
+          kubectl apply -f k8s/backend.yaml
+          kubectl apply -f k8s/frontend.yaml
+          kubectl apply -f k8s/ingress.yaml
