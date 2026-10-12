@@ -17,6 +17,12 @@ app.add_middleware(
 )
 
 
+# Health check for Load Balancers
+@app.get("/")
+def root_health():
+    return {"status": "ok"}
+
+
 # ---------------------------------------------------------------------------
 # Public -- no token required
 # ---------------------------------------------------------------------------
