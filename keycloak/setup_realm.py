@@ -22,7 +22,7 @@ import urllib.request
 
 KEYCLOAK_URL = os.environ.get("KEYCLOAK_URL", "http://keycloak:8080")
 ADMIN_USER = os.environ.get("KC_ADMIN", "admin")
-ADMIN_PASS = os.environ.get("KC_ADMIN_PASSWORD", "admin")
+ADMIN_PASS = os.environ.get("KC_ADMIN_PASSWORD", "admin123")
 REALM = os.environ.get("KC_REALM", "rbac-demo")
 CLIENT_ID = os.environ.get("KC_CLIENT_ID", "rbac-demo-app")
 FRONTEND_ORIGIN = os.environ.get("KC_FRONTEND_ORIGIN", "http://localhost:5173")
@@ -55,15 +55,24 @@ def request(method, path, token=None, body=None):
 
 
 def wait_for_keycloak():
-    print("Waiting for Keycloak to be ready...")
-    for _ in range(80):
-        try:
-            status, _ = request("GET", "/realms/master/.well-known/openid-configuration")
-            if status == 200:
-                print("Keycloak is up.")
-                return
-        except Exception:
-            pass
+    global KEYCLOAK_URL
+    print(f"Waiting for Keycloak... checking base URLs")
+    for attempt in range(80):
+        # Auto-detect whether Keycloak is listening on root or /auth
+        candidates = [KEYCLOAK_URL]
+        if not KEYCLOAK_URL.endswith("/auth"):
+            candidates.append(f"{KEYCLOAK_URL.rstrip('/')}/auth")
+        for candidate in candidates:
+            try:
+                test_url = f"{candidate}/realms/master/.well-known/openid-configuration"
+                req = urllib.request.Request(test_url)
+                with urllib.request.urlopen(req, timeout=3) as resp:
+                    if resp.status == 200:
+                        KEYCLOAK_URL = candidate
+                        print(f"Keycloak is up and responding at: {KEYCLOAK_URL}")
+                        return
+            except Exception:
+                pass
         time.sleep(3)
     print("Keycloak did not become ready in time.")
     sys.exit(1)
